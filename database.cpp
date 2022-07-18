@@ -4,28 +4,22 @@
 #include <string.h>
 #include "database.hpp"
 
-DataBase::DataBase(const char * db)
+DataBase::DataBase(std::string db)
 {
     /*подключается к базе данных от указанного имени пользователя;
     если базы данных с таким именем не существует, то она будет создана от имени postgres*/
-    char conn_info[] = "dbname = ";
-    strcat(conn_info, db);
-    m_conn = PQconnectdb(conn_info);
+    std::string conn_info = "dbname = " + db;
+    m_conn = PQconnectdb(conn_info.c_str());
     ConnStatusType status = PQstatus(m_conn);
-    char query[] = "CREATE DATABASE ";
-    strcat(query, db);
+    std::string query = "CREATE DATABASE " + db;
     if (status == CONNECTION_BAD)
     {
         m_conn = PQconnectdb("dbname = postgres");
-        PGresult * creating_status = PQexec(m_conn, query);
+        PGresult * creating_status = PQexec(m_conn, query.c_str());
         PQclear(creating_status);
+        std::cout << PQresultErrorMessage(creating_status);
         PQfinish(m_conn);
-        m_conn = PQconnectdb(conn_info);
-        std::cout << "Создана новая база данных" << std::endl;
-    }
-    else
-    {
-        std::cout << "Соедиение с базой данных установлено" << std::endl;
+        m_conn = PQconnectdb(conn_info.c_str());
     }
 }
 
@@ -33,7 +27,6 @@ DataBase::~DataBase()
 {
     /*завершает соединение с базой данных*/
     PQfinish(m_conn);
-    std::cout << "Соединение с базой данных закрыто" << std::endl;
 }
 
 void DataBase::add_table(std::string name, std::string id_name, std::string id_type)
@@ -41,6 +34,7 @@ void DataBase::add_table(std::string name, std::string id_name, std::string id_t
     /*создает новую таблицу с единственным столбцом - идентификатором*/
     std::string query = "CREATE TABLE " + name + "(" + id_name + " " + id_type + " PRIMARY KEY" + ");"; 
     PGresult * adding_status = PQexec(m_conn, query.c_str());
+    std::cout << PQresultErrorMessage(adding_status);
     PQclear(adding_status);
 }
 
@@ -49,12 +43,14 @@ void DataBase::add_column(std::string table, std::string column, std::string typ
     /*добавляет столбцы к уже существующей таблице*/
     std::string query = "ALTER TABLE IF EXISTS " + table + " ADD COLUMN " + column + " " + type;
     PGresult * adding_status = PQexec(m_conn, query.c_str());
+    std::cout << PQresultErrorMessage(adding_status);
     PQclear(adding_status);
     if (!ref_table.empty() && !ref_column.empty())
     {
-        query = "ALTER TABLE IF EXISTS " + table + " ADD CONSTRAINT " + column + " FOREIGN KEY (" + column + ") REFERENCES " + ref_table + "(" + ref_column + ");";
-        std::cout << query << std::endl; 
+        query = "ALTER TABLE IF EXISTS " + table + " ADD CONSTRAINT " + column + " FOREIGN KEY (" + column + ") REFERENCES " + ref_table 
+        + "(" + ref_column + ") ON UPDATE CASCADE;";
         PGresult * adding_status = PQexec(m_conn, query.c_str());
+        std::cout << PQresultErrorMessage(adding_status);
         PQclear(adding_status);
     }
 }
@@ -87,10 +83,9 @@ int DataBase::add_item(std::string table, const std::vector <std::string>& colum
         values_query += values[0] + ")";
     }
     query += columns_query + " VALUES " + values_query + ";";
-    std::cout << query;
     PGresult * adding_status = PQexec(m_conn, query.c_str());
+    std::cout << PQresultErrorMessage(adding_status);
     PQclear(adding_status);
-    std::cout << "item was added" << std::endl;
 
     return 0;
 }
@@ -115,20 +110,19 @@ int DataBase::edit_item(std::string table, std::string condition, const std::vec
     {
         query += columns[0] + " = " + values[0] + " WHERE " + condition + ";";
     }
-    std::cout << query << std::endl;
     PGresult * editing_status = PQexec(m_conn, query.c_str());
+    std::cout << PQresultErrorMessage(editing_status);
     PQclear(editing_status);
-    std::cout << "edited" << std::endl;
     return 0;
 }
 
-std::vector<std::vector<std::string>>& DataBase::get_data(std::string table, const std::vector<std::string>& columns = {})
+std::vector<std::vector<std::string>> DataBase::get_data(std::string table, const std::vector<std::string>& columns, std::string condition)
 {
     /*возвращает все записи таблицы, или записи только из определенных столбцов*/ 
     std::string query = "SELECT ";
     if (columns.empty())
     {
-        query += "* FROM " + table + ";";
+        query += "* FROM " + table;
     }
     else if (columns.size() > 1)
     {
@@ -136,16 +130,32 @@ std::vector<std::vector<std::string>>& DataBase::get_data(std::string table, con
         {
             query += columns[i] + ", ";
         }
-        query += columns[columns.size()-1] + " FROM " + table + ";";
+        query += columns[columns.size()-1] + " FROM " + table;
     }
     else
     {
-        query += columns[0] + " FROM " + table + ";";
+        query += columns[0] + " FROM " + table;
     }
-
-    std::cout << query << std::endl;
+    if (!condition.empty())
+    {
+        query += " WHERE " + condition;
+    }
+    query += ";";
     PGresult * getting_status = PQexec(m_conn, query.c_str());
+    std::cout << PQresultErrorMessage(getting_status);
     int nstr = PQntuples(getting_status);
     int ncol = PQnfields(getting_status);
+    std::vector<std::vector<std::string>> result;
+    std::vector <std::string> str;
+    for (int i = 0; i < nstr; ++i)
+    {
+        for (int j = 0; j < ncol; ++j)
+        {
+            str.push_back(PQgetvalue(getting_status, i, j));
+        }
+        result.push_back(str);
+        str.clear();
+    }
     PQclear(getting_status);
+    return result;
 }
